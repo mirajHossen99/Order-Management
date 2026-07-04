@@ -42,8 +42,7 @@ export class ProductService {
     };
   }
 
-  // Find all
-
+  // Find all (supports pagination, filtering, sorting)
   async findAll(query: QueryProductDto) {
     const page = Math.max(1, query.page ?? 1);
     const limit = Math.max(1, query.limit ?? 10);
@@ -64,7 +63,7 @@ export class ProductService {
     return paginate(data, total, page, limit);
   }
 
-  // Find one product
+  // Find a product by ID
   async findOne(id: string) {
     const product = await this.prisma.product.findUnique({ where: { id } });
     if (!product) {
@@ -128,6 +127,7 @@ export class ProductService {
     return { message: 'Product deleted successfully' };
   }
 
+  // Dynamically builds the Prisma where conditions for category, text search, and price range filters.
   private buildWhere(query: QueryProductDto): Prisma.ProductWhereInput {
     const { category, search, minPrice, maxPrice } = query;
     const hasPriceFilter = minPrice !== undefined || maxPrice !== undefined;
@@ -144,6 +144,7 @@ export class ProductService {
     };
   }
 
+  // Validates the sort field and builds the Prisma orderBy configuration object.
   private buildOrderBy(
     query: QueryProductDto,
   ): Prisma.ProductOrderByWithRelationInput {
