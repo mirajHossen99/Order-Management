@@ -1,0 +1,7 @@
+model OrderSequence {
+
+  key   String @id
+  value Int    @default(0)
+
+  @@map("order_sequences")
+}
