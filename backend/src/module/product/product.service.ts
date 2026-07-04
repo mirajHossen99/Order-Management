@@ -80,7 +80,7 @@ export class ProductService {
       throw new NotFoundException(`Product with id "${id}" not found`);
     }
 
-    if (dto.name !== product.name) {
+    if (dto.name && dto.name !== product.name) {
       const duplicate = await this.prisma.product.findFirst({
         where: { name: dto.name },
       });

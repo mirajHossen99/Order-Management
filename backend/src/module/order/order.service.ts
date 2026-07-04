@@ -6,6 +6,9 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderIdGenerator } from './order-id.generator';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { paginate } from 'src/common/dto/paginated-result';
+import { QueryOrderDto } from './dto/query-order.dto';
+import { Prisma } from '../../../prisma/generated/prisma/client';
 
 const ALLOWED_SORT_FIELDS = ['createdAt', 'totalAmount', 'status'];
 const MAX_ID_RETRIES = 3;
@@ -18,6 +21,10 @@ export class OrderService {
   ) {}
 
   async create(userId: string, dto: CreateOrderDto) {
+    if (!userId) {
+      throw new NotFoundException('User not found');
+    }
+
     if (!dto.items?.length) {
       throw new BadRequestException('Order must contain at least one item');
     }
@@ -30,52 +37,48 @@ export class OrderService {
         (mergedItems.get(item.productId) ?? 0) + item.quantity,
       );
     }
-    const productIds = [...mergedItems.keys()];
+
+    const sortedProductIds = [...mergedItems.keys()].sort();
+
+    const productsLookup = await this.prisma.product.findMany({
+      where: { id: { in: sortedProductIds } },
+      select: { id: true, category: true, name: true, price: true },
+    });
+
+    if (productsLookup.length !== sortedProductIds.length) {
+      throw new NotFoundException(
+        'One or more products in your cart do not exist',
+      );
+    }
+
+    const productMap = new Map(productsLookup.map((p) => [p.id, p]));
+
+    // Generate the human-readable Order ID
+    const firstProduct = productMap.get(sortedProductIds[0])!;
+    const orderId = await this.orderIdGenerator.generate(
+      firstProduct.category,
+      firstProduct.name,
+    );
 
     return this.prisma.$transaction(async (tx) => {
-
-      // Fetch current snapshot inside the transaction to verify existence and prices securely
-      const products = await tx.product.findMany({
-        where: { id: { in: productIds } },
-      });
-
-      if (products.length !== productIds.length) {
-        throw new NotFoundException(
-          'One or more products in your cart do not exist',
-        );
-      }
-
-      const productMap = new Map(products.map((p) => [p.id, p]));
-
-      // Generate the human-readable Order ID
-      const firstProduct = productMap.get(productIds[0])!;
-      const orderId = await this.orderIdGenerator.generate(
-        firstProduct.category,
-        firstProduct.name,
-      );
-
-      // Atomically decrement inventory for all items in parallel and strictly enforce stock barriers
-      const updateResults = await Promise.all(
-        [...mergedItems.entries()].map(([productId, quantity]) =>
-          tx.product.updateMany({
-            where: { id: productId, stock: { gte: quantity } },
-            data: { stock: { decrement: quantity } },
-          }),
-        ),
-      );
-
-      const failedIndex = updateResults.findIndex((r) => r.count === 0);
-      if (failedIndex !== -1) {
-        const failedProductId = [...mergedItems.keys()][failedIndex];
-        const failedProduct = productMap.get(failedProductId)!;
-        throw new BadRequestException(
-          `Insufficient stock for "${failedProduct.name}". Please adjust your cart.`,
-        );
-      }
-
       let totalAmount = 0;
-      for (const [productId, quantity] of mergedItems) {
-        totalAmount += Number(productMap.get(productId)!.price) * quantity;
+
+      for (const productId of sortedProductIds) {
+        const quantity = mergedItems.get(productId)!;
+        const product = productMap.get(productId)!;
+
+        const updated = await tx.product.updateMany({
+          where: { id: productId, stock: { gte: quantity } },
+          data: { stock: { decrement: quantity } },
+        });
+
+        if (updated.count === 0) {
+          throw new BadRequestException(
+            `Insufficient stock for "${product.name}". Please adjust your cart.`,
+          );
+        }
+
+        totalAmount += Number(product.price) * quantity;
       }
 
       return tx.order.create({
@@ -85,9 +88,9 @@ export class OrderService {
           totalAmount,
           status: 'PENDING',
           items: {
-            create: [...mergedItems.entries()].map(([productId, quantity]) => ({
+            create: sortedProductIds.map((productId) => ({
               productId,
-              quantity,
+              quantity: mergedItems.get(productId)!,
               price: productMap.get(productId)!.price,
             })),
           },
@@ -95,5 +98,61 @@ export class OrderService {
         include: { items: { include: { product: true } } },
       });
     });
+  }
+
+  // find all
+  async findAll(
+    query: QueryOrderDto,
+    currentUser: { userId: string; role: string },
+  ) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const sortBy = ALLOWED_SORT_FIELDS.includes(query.sortBy ?? '')
+      ? (query.sortBy as string)
+      : 'createdAt';
+    const sortOrder = query.sortOrder ?? 'desc';
+
+    const where: Prisma.OrderWhereInput = {
+      ...(query.status && { status: query.status as any }),
+      ...(query.orderId && { orderId: query.orderId }),
+
+      // Customers only see their own orders
+      // admins see everything.
+      ...(currentUser && currentUser.role !== 'ADMIN'
+        ? { userId: currentUser.userId }
+        : {}),
+    };
+
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.order.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { [sortBy]: sortOrder },
+        include: { items: { include: { product: true } } },
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+
+    return paginate(data, total, page, limit);
+  }
+
+  // find one
+  async findOne(id: string) {
+    const order = await this.prisma.order.findFirst({
+      where: { id },
+      include: {
+        items: { include: { product: true } },
+        user: {
+          select: { id: true, name: true, email: true },
+        },
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException(`Order "${id}" not found`);
+    }
+
+    return order;
   }
 }
