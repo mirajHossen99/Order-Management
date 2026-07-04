@@ -6,6 +6,9 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderIdGenerator } from './order-id.generator';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { paginate } from 'src/common/dto/paginated-result';
+import { QueryOrderDto } from './dto/query-order.dto';
+import { Prisma } from '../../../prisma/generated/prisma/client';
 
 const ALLOWED_SORT_FIELDS = ['createdAt', 'totalAmount', 'status'];
 const MAX_ID_RETRIES = 3;
@@ -95,5 +98,61 @@ export class OrderService {
         include: { items: { include: { product: true } } },
       });
     });
+  }
+
+  // find all
+  async findAll(
+    query: QueryOrderDto,
+    currentUser: { userId: string; role: string },
+  ) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const sortBy = ALLOWED_SORT_FIELDS.includes(query.sortBy ?? '')
+      ? (query.sortBy as string)
+      : 'createdAt';
+    const sortOrder = query.sortOrder ?? 'desc';
+
+    const where: Prisma.OrderWhereInput = {
+      ...(query.status && { status: query.status as any }),
+      ...(query.orderId && { orderId: query.orderId }),
+
+      // Customers only see their own orders
+      // admins see everything.
+      ...(currentUser && currentUser.role !== 'ADMIN'
+        ? { userId: currentUser.userId }
+        : {}),
+    };
+
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.order.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { [sortBy]: sortOrder },
+        include: { items: { include: { product: true } } },
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+
+    return paginate(data, total, page, limit);
+  }
+
+  // find one
+  async findOne(id: string) {
+    const order = await this.prisma.order.findFirst({
+      where: { id },
+      include: {
+        items: { include: { product: true } },
+        user: {
+          select: { id: true, name: true, email: true },
+        },
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException(`Order "${id}" not found`);
+    }
+
+    return order;
   }
 }
