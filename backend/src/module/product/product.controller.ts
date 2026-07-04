@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { ProductService } from './product.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import {
@@ -13,24 +13,29 @@ import { Role } from '../../../prisma/generated/prisma/client';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { QueryProductDto } from './dto/query-product.dto';
+import { UpdateStockDto } from './dto/update-stock.dto';
 
 @ApiTags('products')
 // @UseGuards(JwtGuard)
 @ApiBearerAuth('auth')
 @Controller('products')
-@UseGuards(JwtGuard, RolesGuard)
 export class ProductController {
   constructor(private readonly productService: ProductService) {}
 
   // @UseGuards(JwtGuard)
   @Post()
+  @UseGuards(JwtGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  @ApiBody({
-    description: 'Add product',
-    type: CreateProductDto,
-  })
+  @ApiOperation({ summary: 'Create Product' })
   create(@Body() dto: CreateProductDto) {
     return this.productService.create(dto);
+  }
+
+  @Get()
+  @ApiOperation({ summary: 'List products (supports pagination, filtering, sorting)' })
+  findAll(@Query() query: QueryProductDto) {
+    return this.productService.findAll(query);
   }
 
   @Get(':id')
@@ -41,13 +46,24 @@ export class ProductController {
   }
 
   @Patch(':id')
+  @UseGuards(JwtGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  @ApiBody({ description: 'Update product', type: UpdateProductDto })
+  @ApiOperation({ summary: 'Update product' })
   update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
     return this.productService.update(id, dto);
   }
 
+  @Patch(':id/stock')
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Update the stock quantity of a product' })
+  @ApiResponse({ status: 404, description: 'Product not found' })
+  updateStock(@Param('id') id: string, @Body() dto: UpdateStockDto) {
+    return this.productService.updateStock(id, dto);
+  }
+
   @Delete(':id')
+  @UseGuards(JwtGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Delete a product' })
   delete(@Param('id') id: string) {
