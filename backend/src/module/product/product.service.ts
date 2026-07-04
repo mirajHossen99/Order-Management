@@ -45,7 +45,6 @@ export class ProductService {
   // Find all
 
   async findAll(query: QueryProductDto) {
-    // Math.max ব্যবহার করে পেজিনেশন সেফগার্ড করা চমৎকার আইডিয়া!
     const page = Math.max(1, query.page ?? 1);
     const limit = Math.max(1, query.limit ?? 10);
 
