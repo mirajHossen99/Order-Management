@@ -19,7 +19,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: config.get<string>('JWT_SECRET') as string,
+      secretOrKey: process.env.JWT_SECRET as string,
     });
   }
 
@@ -28,10 +28,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       where: { id: payload.userId },
     });
 
+    // console.log('From jwt-strategy', user?.email);
+
     if (!user) {
       throw new UnauthorizedException('User no longer exists');
     }
 
-    return { userId: user.id, email: user.email, role: user.role };
+    return { id: user.id, email: user.email, role: user.role };
   }
 }
