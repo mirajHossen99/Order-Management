@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import { setupSwagger } from './swagger/swagger.setup';
 import { ValidationPipe } from '@nestjs/common';
+import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 
 
 async function bootstrap() {
@@ -17,6 +18,7 @@ async function bootstrap() {
       disableErrorMessages: false,
     }),
   );
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   const configService = app.get(ConfigService);
 
