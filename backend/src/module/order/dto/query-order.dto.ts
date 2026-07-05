@@ -1,13 +1,12 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString } from 'class-validator';
-
-import { ORDER_STATUSES } from './update-order-status.dto';
+import { IsEnum, IsIn, IsOptional, IsString } from 'class-validator';
+import { OrderStatus } from '../../../../prisma/generated/prisma/client';
 import { PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
 
 export class QueryOrderDto extends PaginationQueryDto {
-  @ApiPropertyOptional({ enum: ORDER_STATUSES })
+  @ApiPropertyOptional({ enum: OrderStatus })
   @IsOptional()
-  @IsIn(ORDER_STATUSES)
+  @IsEnum(OrderStatus)
   status?: string;
 
   @ApiPropertyOptional({
