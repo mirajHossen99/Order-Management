@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -9,9 +10,17 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { paginate } from 'src/common/dto/paginated-result';
 import { QueryOrderDto } from './dto/query-order.dto';
 import { Prisma } from '../../../prisma/generated/prisma/client';
+import { OrderStatus } from '../../../prisma/generated/prisma/client';
+
+const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
+  PENDING: [OrderStatus.PROCESSING, OrderStatus.CANCELLED],
+  PROCESSING: [OrderStatus.SHIPPED, OrderStatus.CANCELLED],
+  SHIPPED: [OrderStatus.DELIVERED],
+  DELIVERED: [],
+  CANCELLED: [],
+};
 
 const ALLOWED_SORT_FIELDS = ['createdAt', 'totalAmount', 'status'];
-const MAX_ID_RETRIES = 3;
 
 @Injectable()
 export class OrderService {
@@ -154,5 +163,128 @@ export class OrderService {
     }
 
     return order;
+  }
+
+  // update status
+  async updateStatus(id: string, status: OrderStatus, userRole: string) {
+    if (userRole !== 'ADMIN') {
+      throw new ForbiddenException(
+        'You do not have permission to update order workflow statuses.',
+      );
+    }
+
+    const order = await this.findOne(id);
+
+    if (
+      order.status === OrderStatus.CANCELLED ||
+      order.status === OrderStatus.DELIVERED
+    ) {
+      throw new BadRequestException(
+        `This order is already ${order.status.toLowerCase()} and cannot be altered.`,
+      );
+    }
+
+    if (order.status === status) {
+      return order;
+    }
+
+    const allowedNext = ALLOWED_TRANSITIONS[order.status as OrderStatus];
+    if (!allowedNext.includes(status)) {
+      throw new BadRequestException(
+        `Cannot change status from "${order.status}" to "${status}"`,
+      );
+    }
+
+    // status updates and stock increments
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        // STEP 1: If cancelled, increment product stocks FIRST so the database updates beforehand
+        if (status === OrderStatus.CANCELLED) {
+          const sortedItems = [...order.items].sort((a, b) =>
+            a.productId.localeCompare(b.productId),
+          );
+
+          for (const item of sortedItems) {
+            await tx.product.update({
+              where: { id: item.productId },
+              data: { stock: { increment: item.quantity } },
+            });
+          }
+        }
+
+        // STEP 2: Update the order and fetch includes LAST.
+        // Now the included product profiles will contain the updated stocks.
+        return await tx.order.update({
+          where: { id: order.id, status: order.status },
+          data: { status },
+          include: { items: { include: { product: true } } },
+        });
+      });
+    } catch (error) {
+      throw new BadRequestException(
+        `The order status was updated concurrently by another admin session. Please refresh the dashboard.`,
+      );
+    }
+  }
+
+  // cancel order
+
+  // update status
+  async updateStatus2(
+    id: string,
+    status: OrderStatus,
+    role: 'CUSTOMER' | 'ADMIN',
+  ) {
+    const order = await this.findOne(id);
+
+    if (
+      order.status === OrderStatus.CANCELLED ||
+      order.status === OrderStatus.DELIVERED
+    ) {
+      throw new BadRequestException(
+        `This order is already ${order.status.toLowerCase()} and its status cannot be modified further.`,
+      );
+    }
+
+    if (order.status === status) {
+      return order;
+    }
+
+    if (status === OrderStatus.CANCELLED) {
+      if (role === 'CUSTOMER' && order.status !== OrderStatus.PENDING) {
+        throw new BadRequestException(
+          `You can only cancel orders that are still pending. This order is already under ${order.status.toLowerCase()}.`,
+        );
+      }
+    }
+
+    if (status !== OrderStatus.CANCELLED && role !== 'ADMIN') {
+      throw new BadRequestException(
+        'Only admins are authorized to advance order stages.',
+      );
+    }
+
+    const allowedNext = ALLOWED_TRANSITIONS[order.status as OrderStatus];
+
+    if (!allowedNext.includes(status)) {
+      throw new BadRequestException(
+        `Cannot change status from "${order.status}" to "${status}"`,
+      );
+    }
+
+    try {
+      return await this.prisma.order.update({
+        where: {
+          id: order.id,
+          status: order.status,
+        },
+        data: { status },
+        include: { items: { include: { product: true } } },
+      });
+    } catch (error) {
+      throw new BadRequestException(
+        `The order status was updated concurrently by another request. Please refresh and try again.`,
+      );
+    }
   }
 }
