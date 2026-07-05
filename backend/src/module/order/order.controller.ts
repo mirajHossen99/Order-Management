@@ -82,4 +82,15 @@ export class OrderController {
     const role = user.role as 'CUSTOMER' | 'ADMIN';
     return this.orderService.updateStatus(id, dto.status, role);
   }
+
+  @Patch(':id/cancel')
+  @UseGuards(JwtGuard)
+  @ApiOperation({ summary: 'Cancel the order' })
+  cancelMyOrder(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const currentUserId = user.id;
+    return this.orderService.cancelOrder(id, currentUserId);
+  }
 }

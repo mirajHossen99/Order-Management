@@ -228,6 +228,55 @@ export class OrderService {
   }
 
   // cancel order
+  async cancelOrder(id: string, currentUserId: string) {
+    const order = await this.findOne(id);
+
+    if (order.userId !== currentUserId) {
+      throw new ForbiddenException(
+        'You do not have permission to cancel this order.',
+      );
+    }
+
+    if (
+      order.status === OrderStatus.CANCELLED ||
+      order.status === OrderStatus.DELIVERED
+    ) {
+      throw new BadRequestException(
+        `This order is already ${order.status.toLowerCase()} and cannot be altered.`,
+      );
+    }
+
+    if (order.status !== OrderStatus.PENDING) {
+      throw new BadRequestException(
+        `You can only cancel orders that are still pending. This order is already under ${order.status.toLowerCase()}.`,
+      );
+    }
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const sortedItems = [...order.items].sort((a, b) =>
+          a.productId.localeCompare(b.productId),
+        );
+
+        for (const item of sortedItems) {
+          await tx.product.update({
+            where: { id: item.productId },
+            data: { stock: { increment: item.quantity } },
+          });
+        }
+
+        return await tx.order.update({
+          where: { id: order.id, status: order.status },
+          data: { status: OrderStatus.CANCELLED },
+          include: { items: { include: { product: true } } },
+        });
+      });
+    } catch (error) {
+      throw new BadRequestException(
+        'The order status was updated concurrently by another parallel session. Please refresh and try again.',
+      );
+    }
+  }
 
   // update status
   async updateStatus2(
