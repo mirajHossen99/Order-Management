@@ -58,8 +58,6 @@ Our architecture prioritizes data integrity, robust security boundaries, and mod
 
 To give fulfillment pipelines instantly recognizable business context at a glance, orders are identified using a customized, structured format:
 
-$$\text{Format: } \langle\text{CATEGORY\_CODE}\rangle-\langle\text{PRODUCT\_CODE}\rangle-\langle\text{YYMMDD}\rangle-\langle\text{SEQUENCE}\rangle$$
-
 > **Example:** `ELE-WIR-260703-0001`
 > * **ELE** (Electronics)
 > * **WIR** (Wireless Mouse)
